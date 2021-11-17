@@ -1,0 +1,134 @@
+Abstract
+This proposal describes how security token protected resources can signal to an
+authorization server that additional claims must be provided in the token before
+the resource can authorize the request. As resources and the authorization 
+server do not directly communicate, the signal is passed through an error 
+returned to the client. 
+
+1. Introduction
+ OAuth enables resources to selectively provide access to clients based on an 
+ access token provided by the authorization server. The method 
+ by which a resource validates that token is authorization-server specific, and
+ for the purpose of this specification we assume an access token from which a
+ resource server can extract data about the users authentication status 
+ [draft-ietf-oauth-access-token-jwt-12]. However, this specification can be 
+ expanded to cover tokens parsed via a token introspection endpoint [..?]. 
+
+ While the scopes associated with an access token are one of the pieces of data
+ used by a resource server to validate an access token, they are often not 
+ granular enough to describe the permission state of each file on a resource 
+ server. Thus, additional rules are often added within the authorization server 
+ and resource server to govern access. Clients often do not know about these 
+ rules/requirements prior to requesting an access token, and the authorization 
+ server does not know specifically what will be accessed on the resource server.
+ Thus, the required authorization server policies that must be run are only 
+ known to the resource server after the client has presented the security token 
+ to the resource server. 
+
+ This specification provides the resource provider a mechanism to request 
+ additional policies or facts about the user be ascertained by the 
+ authorization server. 
+
+1.1. Notational Conventions
+1.2. Terminology
+ Claims request
+ Claims challenge
+ security token
+
+ All other terms are as defined in "The OAuth 2.0 Authorization
+ Framework" [RFC6749] and OpenID Connect [OIDC]
+
+1.3. Overview
+ When a resource server requires additional information provided by the 
+ authorization server, it cannot inform the AS directly.  Instead, it can only
+ return a error to the client application.  The client is then responsible for 
+ ensuring that a subsequent token request to the AS satisfies the additional 
+ requirements put in place by the resource server. 
+
+ +--------+                               +---------------+
+ |        |--(A)- Authorization Request ->| Resource      |
+ |        |                               | Owner         |
+ |        |<-(B)-- Authorization Grant ---|               |
+ |        |                               +---------------+
+ |        |
+ |        |                               +---------------+
+ |        |--(C)-- Authorization Grant -->| Authorization |
+ |        |                               | Server        |
+ |        |<-(D)----- Access Token -------|               |
+ |        |                               +---------------+
+ |        |
+ |        |                               +---------------+
+ |        |--(E)----- Access Token ------>| Resource      |
+ |        |                               | Server        |
+ | Client |<-(F)--- Claims challenge -----|               |
+ |        |                               +---------------+
+ |        |
+ |        |                               +---------------+
+ |        |--(G)-- Refresh Token -------->| Authorization |
+ |        |                               | Server        |
+ |        |<-(H)----- Access Token -------|               |
+ +--------+                               +---------------+
+ Figure 1: Abstract Protocol Flow
+
+ The abstract OAuth 2.0 flow illustrated in Figure 1 describes the
+ interaction between the client, resource owner, authorization server,
+ and resource server (described in [RFC6749] and [RFC6750]). The following 
+ three steps are specified within this document:
+ (F) The resource server validates the access token, and if the claims are 
+ insufficient to allow valdation, returns a claims challenge error.
+ (G) The client, upon receiving a claims challenge, requests a new token from
+ the authorization server using a claims request informed by the claims 
+ challenge. 
+ (H) The AS, upon recieiving a claims request, fulfills the request as possible,
+ according to the OpenID Connect [OIDC] claims request specification. 
+
+2. The Claims Challenge WWW-Authenticate Response Header
+ If the resource requires additional claims within a presented security token, 
+ the resource server MUST include the HTTP "WWW-Authenticate" response header 
+ field; it MAY include it in response to other conditions as well. The 
+ "WWW-Authenticate" header field uses the framework defined by HTTP/1.1 
+ [RFC2617]. This specification does not require a specific auth-scheme; the 
+ resource SHOULD use the same scheme initially sent by the client, unless the 
+ resource server does not support it.  The "error" attribute MUST be 
+ "insufficient_claims" (specified in Appendix A.? of [this]).  A "claims" 
+ attribute MUST be included (specified in Appendix A.? of [this]). 
+
+ If no security token is presented in the request, the resource server MAY 
+ respond with a claims challenge.  This allows clients to determine what claims
+ are required prior to authentication.  However, this may not be possible if 
+ policy is dependent on user identity, and may be considered unneccesary exposure
+ of security requirements. 
+
+ Example response header:
+ HTTP/1.1 401  Unauthorized
+ WWW-Authenticate: Bearer realm="example",
+ error="insufficient_claims", 
+ claims="eyJhY2Nlc3NfdG9rZW4iOnsiYWNycyI6eyJlc3NlbnRpYWwiOnRydWUsInZhbHVlIjoiYzEifX19"
+
+2.1. Error Code
+ When a request fails due to insufficient claims, the resource server MUST 
+ respond with the following error code:
+ insufficient_claims
+ The contents of the security token are insufficient to determine 
+ if access should be allowed. They may be expired, revoked, or
+ missing. The resource MUST respond with the HTTP 401 (Unauthorized) 
+ status code and MUST include the "claims" attribute. The client SHOULD 
+ request a new security token with the provided claims request and then
+ attempt to call the protected resource with the new token.  
+ 
+2.2. "Claims" attribute 
+ The "claims" attribute is a base64URI encoded claims request as specified in 
+ OpenID Connect [OIDC]. The type of security token, as well as the claims 
+ required and optionally the required values, are embedded within the claims
+ request. This specification includes two types of security tokens - 
+ "access_token", and "id_token" - but does not limit other types of tokens that 
+ could be used within an authentication system. 
+ The type of security token in the claims request MUST match the type of token 
+ presented by the client to the resource server. 
+ To reduce size, the resource server SHOULD minify the JSON before encoding it. 
+
+3. Client handling of the "claims" attribute
+ If a client receives a WWW-Authenticate header in the response from the 
+ resource server, then it MUST check for the presence of the "claims" 
+ attribute. 
+ 
